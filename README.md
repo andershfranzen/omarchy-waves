@@ -106,7 +106,8 @@ Switch on **Show on lock screen** under *Extras*, or run:
 Omarchy's lock screen is a plugin of its own, and only a clone of it may act as
 the lock screen. So Waves clones it and adds itself to the clone as a backdrop
 over the usual blurred wallpaper; the password field and everything about
-unlocking are Omarchy's code, untouched. Check the result without locking:
+unlocking are Omarchy's code, untouched, and the backdrop is disabled for input
+so it never sees what you type. Check the result without locking:
 
 ```bash
 omarchy-shell lock preview      # and: omarchy-shell lock hidePreview
@@ -126,6 +127,7 @@ to its `LockView.qml` yourself, after the `MultiEffect` that blurs the wallpaper
 Loader {
   anchors.fill: parent
   active: root.loadBackground
+  enabled: false  // a backdrop only: it never receives keys or the pointer
   visible: status === Loader.Ready && item !== null && item.ready === true
   source: Qt.resolvedUrl("../io.github.andershfranzen.waves/WaveBackdrop.qml")
   onLoaded: {

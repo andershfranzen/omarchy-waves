@@ -88,6 +88,7 @@ patch_lock_view() {
       print indent "Loader {"
       print indent "  anchors.fill: parent"
       print indent "  active: root.loadBackground"
+      print indent "  enabled: false  // a backdrop only: it never receives keys or the pointer"
       print indent "  visible: status === Loader.Ready && item !== null && item.ready === true"
       print indent "  source: Qt.resolvedUrl(\"../" dir "/WaveBackdrop.qml\")"
       print indent "  onLoaded: {"

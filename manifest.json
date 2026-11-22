@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.andershfranzen.waves",
   "name": "Waves",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "andershfranzen",
   "description": "Live GPU wallpaper: flowing waves or a ringed planet, drawn by a shader at your display's refresh rate, with a settings menu in the bar",
   "kinds": [

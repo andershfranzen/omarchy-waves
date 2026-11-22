@@ -1,0 +1,88 @@
+name: Release
+
+# Pushing a tag like v1.2.0 publishes a GitHub release and asks the Omarchy
+# plugin marketplace to verify and publish that exact commit.
+#
+# The marketplace request is an issue in another repository, which the
+# built-in token cannot open. Store a personal access token that may create
+# issues in public repositories as the repository secret MARKETPLACE_TOKEN.
+# Without it the release is still made and the request is skipped.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag matches the manifest and the head of main
+        run: |
+          version=$(jq -r .version manifest.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match manifest version $version"
+            exit 1
+          fi
+          git fetch origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "::error::the tag is not at the head of main; the marketplace only publishes the current head"
+            exit 1
+          fi
+
+      - name: Release notes from the changelog
+        run: |
+          version=$(jq -r .version manifest.json)
+          awk -v v="$version" '
+            /^## / { on = ($2 == v) ; next }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || echo "See CHANGELOG.md." > notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "Waves ${GITHUB_REF_NAME#v}" --notes-file notes.md
+
+      - name: Ask the marketplace to verify this commit
+        env:
+          GH_TOKEN: ${{ secrets.MARKETPLACE_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::MARKETPLACE_TOKEN is not set; skipped the marketplace request. File it by hand: https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=verify-plugin.yml"
+            exit 0
+          fi
+          cat > request.md <<BODY
+          ### Verification action
+
+          Verify and publish a newer upstream commit
+
+          ### Plugin ID
+
+          $(jq -r .id manifest.json)
+
+          ### Repository URL
+
+          https://github.com/${GITHUB_REPOSITORY}
+
+          ### Target commit
+
+          $(git rev-parse HEAD)
+
+          ### Verification acknowledgment
+
+          - [x] I understand that only the exact target commit can become a verified marketplace snapshot and that verification is not a security audit.
+
+          ### Standard installation acknowledgment
+
+          - [ ] I confirm that this listed root plugin supports the standard Omarchy installation path and does not require manual setup.
+          BODY
+          sed -i 's/^          //' request.md
+          gh issue create --repo omacom/omarchy-plugin-marketplace \
+            --title "[Verify]: Waves ${GITHUB_REF_NAME#v}" --body-file request.md

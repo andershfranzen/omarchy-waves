@@ -36,5 +36,10 @@
   "preset.hint": "Click to apply, right-click to remove",
   "perTheme": "Remember per theme",
   "perTheme.hint": "Each theme keeps its own style and colours",
-  "reset": "Reset to defaults"
+  "reset": "Reset to defaults",
+  "section.extras": "Extras",
+  "lock": "Show on lock screen",
+  "lock.hint": "Clones Omarchy's lock screen and adds Waves to it; rebuilt after Omarchy updates. Restarts the bar.",
+  "autoUpdate": "Update with Omarchy",
+  "autoUpdate.hint": "Fetch the newest Waves whenever you run omarchy update"
 }

@@ -1,0 +1,58 @@
+name: Check
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: JSON files parse
+        run: |
+          for file in manifest.json i18n/*.json; do
+            jq -e . "$file" >/dev/null || { echo "::error file=$file::not valid JSON"; exit 1; }
+          done
+
+      - name: Manifest is complete
+        run: |
+          jq -e '.id == "io.github.andershfranzen.waves"
+                 and (.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+                 and (.entryPoints.service | type == "string")
+                 and (.entryPoints.barWidget | type == "string")' manifest.json >/dev/null
+          for entry in $(jq -r '.entryPoints[]' manifest.json); do
+            test -f "$entry" || { echo "::error::entry point $entry is missing"; exit 1; }
+          done
+
+      - name: Helper script
+        run: |
+          bash -n bin/waves
+          test -x bin/waves || { echo "::error file=bin/waves::not executable"; exit 1; }
+          shellcheck -S warning bin/waves
+
+      # A shader source and its compiled .qsb must change together; the
+      # compiled file is what the plugin loads.
+      - name: Compiled shaders follow their sources
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "No earlier commit to compare with; skipping."
+            exit 0
+          fi
+          changed=$(git diff --name-only "$base" HEAD)
+          status=0
+          for source in $(echo "$changed" | grep '\.frag$' || true); do
+            if ! echo "$changed" | grep -qx "$source.qsb"; then
+              echo "::error file=$source::changed without rebuilding $source.qsb (run qsb --qt6 -o $source.qsb $source)"
+              status=1
+            fi
+          done
+          exit $status

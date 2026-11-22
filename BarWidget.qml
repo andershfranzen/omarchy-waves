@@ -64,11 +64,21 @@ BarWidget {
     var c = preset ? preset.color : "theme"
     return Palette.isColor(c) ? c : Commons.Color.accent
   }
+  // The extras that have to run commands (cloning the lock screen, updating
+  // from git) live in bin/waves; it records each switch in the settings
+  // file, which is how this menu sees the result.
+  readonly property string helper: Quickshell.env("HOME") + "/.config/omarchy/plugins/" + moduleName + "/bin/waves"
+  function runHelper(args) {
+    if (bar && typeof bar.run === "function") bar.run("'" + helper + "' " + args)
+  }
+
   // Back to the defaults, keeping saved presets and per-theme looks.
   function reset() {
     var next = ({})
     if (conf.presets) next.presets = conf.presets
     if (conf.themes) next.themes = conf.themes
+    if (conf.lockScreen) next.lockScreen = conf.lockScreen
+    if (conf.autoUpdate) next.autoUpdate = conf.autoUpdate
     conf = next
     writeTimer.start()
   }
@@ -667,6 +677,24 @@ BarWidget {
         hint: strings.t("perTheme.hint")
         checked: root.value("perTheme")
         onToggled: root.set("perTheme", !root.value("perTheme"))
+      }
+
+      PanelSeparator { width: parent.width }
+
+      // Extras
+      PanelSectionHeader { text: strings.t("section.extras"); foreground: root.fg }
+
+      SwitchRow {
+        label: strings.t("lock")
+        hint: strings.t("lock.hint")
+        checked: root.value("lockScreen")
+        onToggled: root.runHelper(root.value("lockScreen") ? "lock disable" : "lock enable")
+      }
+      SwitchRow {
+        label: strings.t("autoUpdate")
+        hint: strings.t("autoUpdate.hint")
+        checked: root.value("autoUpdate")
+        onToggled: root.runHelper(root.value("autoUpdate") ? "autoupdate off" : "autoupdate on")
       }
 
       PanelSeparator { width: parent.width }

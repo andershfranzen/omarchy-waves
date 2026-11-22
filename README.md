@@ -25,6 +25,7 @@ A palette icon in the bar opens the settings, with a live preview at the top:
 - **Motion**: speed (down to paused) and brightness.
 - **Rendering**: frame rate, a lower frame rate while windows cover the workspace, and full or half resolution.
 - **Presets**: save up to eight looks. *Remember per theme* keeps a separate look for each theme.
+- **Extras**: show Waves on the lock screen, and update it whenever Omarchy updates. Both are off until you switch them on.
 
 ## Install
 
@@ -48,12 +49,26 @@ Two files the plugin wrote are left behind and can be deleted:
 
 ## What it touches
 
+Out of the box:
+
 - It draws on its own layer above your background and below every window. Your
   background setting is not changed.
 - It writes only the two files listed above. The still is refreshed a few
   seconds after you change the look, in case you want a matching image
   elsewhere (set it yourself with `omarchy theme bg set`).
 - It uses no network and runs no commands.
+
+Only if you switch on an extra in the menu, `bin/waves` also:
+
+- **Show on lock screen**: runs `omarchy plugin clone omarchy.lock`, adds one
+  `Loader` to the clone's `LockView.qml`, and restarts the shell.
+- **Update with Omarchy**: runs `omarchy plugin update` for Waves during
+  `omarchy update`, which fetches from this repository.
+- Either one installs `~/.config/omarchy/hooks/post-update.d/waves`, removed
+  again when both are off.
+
+Before removing the plugin, switch *Show on lock screen* off (or run
+`bin/waves lock disable`) so the lock-screen clone goes with it.
 
 ## Settings file and commands
 
@@ -82,15 +97,30 @@ when animations are turned off with `omarchy toggle animations`.
 
 ## On the lock screen
 
-The lock screen is a separate Omarchy plugin, so Waves cannot add itself to it.
-To use it there, clone the lock screen and load the backdrop in the clone:
+Switch on **Show on lock screen** under *Extras*, or run:
 
 ```bash
-omarchy plugin clone omarchy.lock
+~/.config/omarchy/plugins/io.github.andershfranzen.waves/bin/waves lock enable
 ```
 
-Then, in `~/.config/omarchy/plugins/<you>.lock/LockView.qml`, add this after the
-`MultiEffect` that blurs the wallpaper:
+Omarchy's lock screen is a plugin of its own, and only a clone of it may act as
+the lock screen. So Waves clones it and adds itself to the clone as a backdrop
+over the usual blurred wallpaper; the password field and everything about
+unlocking are Omarchy's code, untouched. Check the result without locking:
+
+```bash
+omarchy-shell lock preview      # and: omarchy-shell lock hidePreview
+```
+
+A clone would normally stop following Omarchy's lock-screen updates. To avoid
+that, a post-update hook rebuilds the clone from the current stock lock screen
+whenever `omarchy update` has changed it. If the stock lock screen ever changes
+so that Waves no longer fits, the clone is removed, you are told, and the stock
+lock screen is used. If Waves itself is missing or fails to load, the clone
+shows the stock wallpaper.
+
+If you already have your own lock-screen clone, Waves leaves it alone. Add this
+to its `LockView.qml` yourself, after the `MultiEffect` that blurs the wallpaper:
 
 ```qml
 Loader {
@@ -106,15 +136,20 @@ Loader {
 }
 ```
 
-Restart the shell (`omarchy restart shell`) and check it with
-`omarchy-shell lock preview`. If Waves is ever removed the stock wallpaper shows
-again. A cloned lock screen no longer follows Omarchy's own lock-screen updates;
-`omarchy plugin remove <you>.lock` goes back to the stock one.
+## Updating
+
+```bash
+omarchy plugin update io.github.andershfranzen.waves
+```
+
+Or switch on **Update with Omarchy** under *Extras* to have `omarchy update` do
+it. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
 - Omarchy 4 (the Quickshell-based Omarchy shell) on Hyprland.
 - A GPU. Nothing else needs installing: the compiled shaders are in the repository.
+- The two extras use `jq` and `git`, both part of Omarchy.
 
 ## Development
 
@@ -128,6 +163,12 @@ it with the Qt shader tools (`qt6-shadertools`, already part of Omarchy):
 
 `WaveScene.qml` is the whole picture as one component (settings in, animation
 out); the wallpaper, the menu preview and the lock-screen backdrop all use it.
+
+To release: bump `version` in `manifest.json`, add a section to `CHANGELOG.md`,
+merge to `main`, and push a tag `v<version>`. The release workflow publishes a
+GitHub release and files the marketplace's verification request for that commit
+(it needs the `MARKETPLACE_TOKEN` secret described in
+`.github/workflows/release.yml`).
 
 ## License
 

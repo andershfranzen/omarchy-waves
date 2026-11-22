@@ -1,0 +1,242 @@
+#!/bin/bash
+# waves: the optional extras of the Waves wallpaper that need to run commands.
+#
+#   waves lock enable|disable|status   put Waves on the lock screen, or take it off
+#   waves lock refresh [--force]       rebuild the lock screen after an Omarchy update
+#   waves autoupdate on|off            update Waves whenever Omarchy updates
+#   waves post-update                  what the post-update hook runs
+#
+# Nothing here runs unless you switch it on in the Waves menu or run it yourself.
+#
+# The lock screen is Omarchy's own plugin, and only a clone of it may act as
+# the lock screen. "lock enable" makes that clone (omarchy plugin clone
+# omarchy.lock) and adds one Loader to its LockView.qml that draws Waves over
+# the blurred wallpaper. A clone does not follow Omarchy's updates, so
+# "lock refresh" throws it away and rebuilds it from the current stock lock
+# screen whenever that has changed. If the stock lock screen ever changes so
+# the Loader no longer fits, the clone is removed and you are back on stock.
+
+set -euo pipefail
+
+PLUGINS="$HOME/.config/omarchy/plugins"
+SELF_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+WAVES_DIR=$(basename "$SELF_DIR")
+WAVES_ID=$(jq -r '.id' "$SELF_DIR/manifest.json")
+CLONE_ID="${USER:-$(id -un)}.lock"
+CLONE="$PLUGINS/$CLONE_ID"
+MARK="$CLONE/.waves-lock"
+SETTINGS="$HOME/.config/omarchy/waves.json"
+HOOK="$HOME/.config/omarchy/hooks/post-update.d/waves"
+STOCK="${OMARCHY_PATH:-/usr/share/omarchy}/shell/plugins/lock"
+RESTART=1
+
+say() { echo "waves: $*"; }
+fail() { echo "waves: $*" >&2; exit 1; }
+
+notify() {
+  command -v omarchy-notification-send >/dev/null && omarchy-notification-send "Waves" "$1" || true
+}
+
+# Record a switch in the settings file, where the menu reads it.
+set_flag() {
+  local key=$1 value=$2 tmp
+  mkdir -p "$(dirname "$SETTINGS")"
+  [[ -s $SETTINGS ]] || echo '{}' >"$SETTINGS"
+  tmp=$(mktemp "$SETTINGS.XXXXXX")
+  if jq --arg k "$key" --argjson v "$value" '.[$k] = $v' "$SETTINGS" >"$tmp"; then
+    mv "$tmp" "$SETTINGS"
+  else
+    rm -f "$tmp"
+    fail "could not update $SETTINGS"
+  fi
+}
+
+flag() { jq -r --arg k "$1" '.[$k] // false' "$SETTINGS" 2>/dev/null || echo false; }
+
+restart_shell() {
+  (( RESTART )) || return 0
+  # Detached: the menu that started us lives in the shell being restarted.
+  setsid -f omarchy restart shell >/dev/null 2>&1 || true
+}
+
+# One fingerprint for the stock lock screen, to tell when an update changed it.
+stock_hash() {
+  find "$STOCK" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+}
+
+# Add the Waves Loader to the clone's LockView.qml, right after the MultiEffect
+# that blurs the wallpaper. Fails, changing nothing, if that is not found.
+patch_lock_view() {
+  local view="$CLONE/LockView.qml" tmp
+  [[ -f $view ]] || return 1
+  grep -q 'WaveBackdrop.qml' "$view" && return 0
+  tmp=$(mktemp "$view.XXXXXX")
+  if awk -v dir="$WAVES_DIR" '
+    !done && !inside && /^[[:space:]]*MultiEffect[[:space:]]*\{[[:space:]]*$/ {
+      inside = 1
+      indent = $0
+      sub(/MultiEffect.*/, "", indent)
+    }
+    { print }
+    inside && $0 == indent "}" {
+      inside = 0
+      done = 1
+      print ""
+      print indent "// Waves: the live wallpaper in place of the blurred still. If the Waves"
+      print indent "// plugin is missing or fails to load, this stays hidden and the stock"
+      print indent "// wallpaper above shows as before."
+      print indent "Loader {"
+      print indent "  anchors.fill: parent"
+      print indent "  active: root.loadBackground"
+      print indent "  visible: status === Loader.Ready && item !== null && item.ready === true"
+      print indent "  source: Qt.resolvedUrl(\"../" dir "/WaveBackdrop.qml\")"
+      print indent "  onLoaded: {"
+      print indent "    item.accent = Qt.binding(function() { return Commons.Color.accent })"
+      print indent "    item.base = Qt.binding(function() { return Commons.Color.background })"
+      print indent "    item.fade = Qt.binding(function() { return Style.duration(250) })"
+      print indent "    item.running = Qt.binding(function() { return root.loadBackground && Style.duration(100) > 0 })"
+      print indent "  }"
+      print indent "}"
+    }
+    END { exit done ? 0 : 1 }
+  ' "$view" >"$tmp"; then
+    mv "$tmp" "$view"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+remove_clone() {
+  local before after
+  before=$(find "$PLUGINS" -maxdepth 1 -name ".${CLONE_ID}.bak.*" 2>/dev/null | sort)
+  omarchy plugin remove "$CLONE_ID" --yes >/dev/null
+  # "plugin remove" keeps a backup; ours is a generated copy, so drop it.
+  after=$(find "$PLUGINS" -maxdepth 1 -name ".${CLONE_ID}.bak.*" 2>/dev/null | sort)
+  comm -13 <(echo "$before") <(echo "$after") | while IFS= read -r backup; do
+    [[ -n $backup && -f $backup/.waves-lock ]] && rm -rf "$backup"
+  done
+  return 0
+}
+
+build_clone() {
+  [[ -d $STOCK ]] || fail "Omarchy's lock screen was not found at $STOCK"
+  omarchy plugin clone omarchy.lock >/dev/null
+  if ! patch_lock_view; then
+    touch "$MARK"
+    remove_clone
+    return 1
+  fi
+  stock_hash >"$MARK"
+}
+
+install_hook() {
+  mkdir -p "$(dirname "$HOOK")"
+  cat >"$HOOK" <<HOOKEOF
+#!/bin/bash
+# Installed by the Waves wallpaper plugin ($WAVES_ID).
+# Keeps its lock screen and, if switched on, the plugin itself up to date.
+waves="\$HOME/.config/omarchy/plugins/$WAVES_DIR/bin/waves"
+[[ -x \$waves ]] && exec "\$waves" post-update
+exit 0
+HOOKEOF
+  chmod +x "$HOOK"
+}
+
+# The hook stays for as long as either extra needs it.
+sync_hook() {
+  if [[ $(flag lockScreen) == true || $(flag autoUpdate) == true ]]; then
+    install_hook
+  else
+    rm -f "$HOOK"
+  fi
+}
+
+lock_enable() {
+  if [[ -d $CLONE ]]; then
+    if grep -q 'WaveBackdrop.qml' "$CLONE/LockView.qml" 2>/dev/null; then
+      # Already there (set up by hand, perhaps): adopt it and keep the path current.
+      sed -i -E "s|\\.\\./[^/\"]+/WaveBackdrop\\.qml|../$WAVES_DIR/WaveBackdrop.qml|" "$CLONE/LockView.qml"
+      [[ -s $MARK ]] || stock_hash >"$MARK"
+    elif [[ -f $MARK ]]; then
+      patch_lock_view || fail "could not add Waves to $CLONE/LockView.qml"
+    else
+      fail "you already have your own lock screen at $CLONE; Waves will not change it. Add the Loader from the README yourself, or remove that clone first."
+    fi
+  else
+    build_clone || fail "Omarchy's lock screen has changed and Waves no longer fits it; you are still on the stock lock screen."
+  fi
+  set_flag lockScreen true
+  sync_hook
+  say "Waves is on the lock screen. Check it with: omarchy-shell lock preview"
+  restart_shell
+}
+
+lock_disable() {
+  if [[ -f $MARK ]]; then
+    remove_clone
+    say "removed the lock screen clone; the stock lock screen is back"
+  elif [[ -d $CLONE ]]; then
+    say "left $CLONE alone: Waves did not make it"
+  fi
+  set_flag lockScreen false
+  sync_hook
+  restart_shell
+}
+
+lock_refresh() {
+  local force=${1:-}
+  [[ -f $MARK ]] || return 0
+  if [[ $force != --force && $(cat "$MARK") == "$(stock_hash)" ]]; then
+    return 0
+  fi
+  remove_clone
+  if build_clone; then
+    say "rebuilt the lock screen from Omarchy's current one"
+  else
+    set_flag lockScreen false
+    sync_hook
+    notify "Omarchy's lock screen changed and Waves no longer fits it. The stock lock screen is in use."
+    say "Omarchy's lock screen changed and Waves no longer fits it; back on the stock lock screen"
+  fi
+  restart_shell
+}
+
+lock_status() {
+  if [[ -f $MARK ]]; then
+    if [[ $(cat "$MARK") == "$(stock_hash)" ]]; then echo "on"; else echo "on, out of date (run: waves lock refresh)"; fi
+  elif [[ -d $CLONE ]] && grep -q 'WaveBackdrop.qml' "$CLONE/LockView.qml" 2>/dev/null; then
+    echo "on, set up by hand (run: waves lock enable to have it kept up to date)"
+  else
+    echo "off"
+  fi
+}
+
+post_update() {
+  RESTART=0
+  local changed=0
+  if [[ $(flag autoUpdate) == true && -d $SELF_DIR/.git ]]; then
+    local before
+    before=$(git -C "$SELF_DIR" rev-parse HEAD 2>/dev/null || true)
+    omarchy plugin update "$WAVES_ID" --yes >/dev/null 2>&1 || say "could not update Waves (local changes, or no network)"
+    [[ $(git -C "$SELF_DIR" rev-parse HEAD 2>/dev/null || true) == "$before" ]] || { changed=1; say "updated Waves"; }
+  fi
+  if [[ -f $MARK && $(cat "$MARK") != "$(stock_hash)" ]]; then
+    lock_refresh
+    changed=1
+  fi
+  RESTART=1
+  (( changed )) && restart_shell
+  return 0
+}
+
+case "${1:-} ${2:-}" in
+  "lock enable") lock_enable ;;
+  "lock disable") lock_disable ;;
+  "lock refresh") lock_refresh "${3:-}" ;;
+  "lock status") lock_status ;;
+  "autoupdate on") set_flag autoUpdate true; sync_hook; say "Waves will update whenever Omarchy updates" ;;
+  "autoupdate off") set_flag autoUpdate false; sync_hook; say "automatic updates are off" ;;
+  "post-update ") post_update ;;
+  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 64 ;;
+esac

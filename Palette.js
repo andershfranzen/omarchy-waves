@@ -18,6 +18,8 @@ var defaults = {
   behindFps: 60,         // while windows cover the workspace: 0 same, -1 paused
   waveScale: 1,
   perTheme: false,       // remember the look separately for each theme
+  lockScreen: false,     // set by bin/waves: Waves is on the lock screen
+  autoUpdate: false,     // set by bin/waves: update Waves with Omarchy
   presets: [],
   themes: {}
 }

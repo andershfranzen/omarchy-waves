@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.andershfranzen.waves",
+  "name": "Waves",
+  "version": "1.0.0",
+  "author": "andershfranzen",
+  "description": "Live GPU wallpaper: flowing waves or a ringed planet, drawn by a shader at your display's refresh rate, with a settings menu in the bar",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Waves",
+    "description": "Style, colours, motion and rendering of the Waves wallpaper",
+    "category": "Appearance",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  },
+  "license": "MIT"
+}
